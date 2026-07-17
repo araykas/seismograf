@@ -84,8 +84,28 @@ class _HistoryPageState extends State<HistoryPage> {
     );
 
     if (confirm == true) {
-      await _db.deleteSession(sessionId);
-      _refreshSessions();
+      try {
+        await _db.deleteSession(sessionId);
+        _refreshSessions();
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Session deleted'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error deleting session: $e'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
     }
   }
 

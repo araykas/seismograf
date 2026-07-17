@@ -24,30 +24,56 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
     _sessionData = _loadSessionData();
   }
 
+  @override
+  void dispose() {
+    super.dispose();
+  }
+
   Future<_SessionData> _loadSessionData() async {
-    final session = await _db.getSession(widget.sessionId);
-    final logs = await _db.getSessionLogs(widget.sessionId);
+    try {
+      final session = await _db.getSession(widget.sessionId);
 
-    if (session == null) {
-      throw Exception('Session not found');
+      if (session == null) {
+        throw Exception('Session not found');
+      }
+
+      // Use downsampling for better performance with large datasets
+      final logs = await _db.getSessionLogsWithDownsampling(
+        widget.sessionId,
+        maxPoints: 150,
+      );
+
+      final spots = <FlSpot>[];
+      for (int i = 0; i < logs.length; i++) {
+        final mag = (logs[i]['magnitude'] as num?)?.toDouble() ?? 0.0;
+        spots.add(FlSpot(i.toDouble(), mag));
+      }
+
+      return _SessionData(
+        startTime: DateTime.parse(session['start_time'] as String),
+        endTime: session['end_time'] != null
+            ? DateTime.parse(session['end_time'] as String)
+            : null,
+        maxVibration: (session['max_vibration'] as num?)?.toDouble() ?? 0.0,
+        avgVibration: (session['avg_vibration'] as num?)?.toDouble() ?? 0.0,
+        spots: spots,
+        logCount: logs.length,
+        totalLogCount: await _getTotalLogCount(widget.sessionId),
+      );
+    } catch (e) {
+      debugPrint('Error loading session data: $e');
+      rethrow;
     }
+  }
 
-    final spots = <FlSpot>[];
-    for (int i = 0; i < logs.length; i++) {
-      final mag = (logs[i]['magnitude'] as num?)?.toDouble() ?? 0.0;
-      spots.add(FlSpot(i.toDouble(), mag));
+  Future<int> _getTotalLogCount(int sessionId) async {
+    try {
+      final logs = await _db.getSessionLogs(sessionId);
+      return logs.length;
+    } catch (e) {
+      debugPrint('Error getting total log count: $e');
+      return 0;
     }
-
-    return _SessionData(
-      startTime: DateTime.parse(session['start_time'] as String),
-      endTime: session['end_time'] != null
-          ? DateTime.parse(session['end_time'] as String)
-          : null,
-      maxVibration: (session['max_vibration'] as num?)?.toDouble() ?? 0.0,
-      avgVibration: (session['avg_vibration'] as num?)?.toDouble() ?? 0.0,
-      spots: spots,
-      logCount: logs.length,
-    );
   }
 
   @override
@@ -114,7 +140,12 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
                             'Avg Vibration',
                             '${data.avgVibration.toStringAsFixed(2)} m/s²',
                           ),
-                          _buildInfoRow('Data Points', '${data.logCount}'),
+                          _buildInfoRow(
+                            'Data Points',
+                            data.isDownsampled
+                                ? '${data.logCount} / ${data.totalLogCount} (downsampled)'
+                                : '${data.logCount}',
+                          ),
                         ],
                       ),
                     ),
@@ -138,6 +169,7 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
                                   gridData: FlGridData(
                                     show: true,
                                     drawVerticalLine: false,
+                                    horizontalInterval: 5,
                                     getDrawingHorizontalLine: (v) => FlLine(
                                       color: Colors.grey.shade300,
                                       strokeWidth: 0.8,
@@ -181,8 +213,10 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
                                     LineChartBarData(
                                       spots: data.spots,
                                       isCurved: true,
+                                      curveSmoothness: 0.35,
                                       color: Colors.green,
                                       barWidth: 2.0,
+                                      isStrokeCapRound: true,
                                       dotData: FlDotData(show: false),
                                       belowBarData: BarAreaData(
                                         show: true,
@@ -192,6 +226,39 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
                                       ),
                                     ),
                                   ],
+                                  lineTouchData: LineTouchData(
+                                    enabled: true,
+                                    handleBuiltInTouches: true,
+                                    getTouchedSpotIndicator:
+                                        (
+                                          LineChartBarData barData,
+                                          List<int> spotIndexes,
+                                        ) {
+                                          return spotIndexes.map((index) {
+                                            return TouchedSpotIndicatorData(
+                                              FlLine(
+                                                color: Colors.blue.withValues(
+                                                  alpha: 0.5,
+                                                ),
+                                                strokeWidth: 4,
+                                              ),
+                                              FlDotData(
+                                                getDotPainter:
+                                                    (
+                                                      spot,
+                                                      percent,
+                                                      barData,
+                                                      index,
+                                                    ) => FlDotCirclePainter(
+                                                      radius: 4,
+                                                      color: Colors.blue,
+                                                      strokeWidth: 0,
+                                                    ),
+                                              ),
+                                            );
+                                          }).toList();
+                                        },
+                                  ),
                                 ),
                               ),
                       ),
@@ -232,6 +299,7 @@ class _SessionData {
   final double avgVibration;
   final List<FlSpot> spots;
   final int logCount;
+  final int totalLogCount;
 
   _SessionData({
     required this.startTime,
@@ -240,5 +308,8 @@ class _SessionData {
     required this.avgVibration,
     required this.spots,
     required this.logCount,
+    required this.totalLogCount,
   });
+
+  bool get isDownsampled => logCount < totalLogCount;
 }

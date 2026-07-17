@@ -67,6 +67,14 @@ class DatabaseHelper {
         FOREIGN KEY ($colSessionFk) REFERENCES $tableMonitoringSessions ($colSessionId) ON DELETE CASCADE
       )
       ''');
+
+    // Create indexes for performance optimization
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_session_id ON $tableVibrationLogs ($colSessionFk);',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_timestamp ON $tableVibrationLogs ($colTimestamp);',
+    );
   }
 
   // ===== Session Operations =====
@@ -193,6 +201,39 @@ class DatabaseHelper {
       whereArgs: [sessionId],
       orderBy: '$colTimestamp ASC',
     );
+  }
+
+  /// Fetch logs with automatic downsampling for large datasets
+  Future<List<Map<String, dynamic>>> getSessionLogsWithDownsampling(
+    int sessionId, {
+    int maxPoints = 150,
+  }) async {
+    final db = await database;
+    final allLogs = await db.query(
+      tableVibrationLogs,
+      where: '$colSessionFk = ?',
+      whereArgs: [sessionId],
+      orderBy: '$colTimestamp ASC',
+    );
+
+    if (allLogs.length <= maxPoints) {
+      return allLogs;
+    }
+
+    // LTTB-inspired downsampling: take every Nth point
+    final downSamplingFactor = (allLogs.length / maxPoints).ceil();
+    final downSampledLogs = <Map<String, dynamic>>[];
+
+    for (int i = 0; i < allLogs.length; i += downSamplingFactor) {
+      downSampledLogs.add(allLogs[i]);
+    }
+
+    // Always include the last point for accurate max value
+    if (downSampledLogs.last != allLogs.last) {
+      downSampledLogs.add(allLogs.last);
+    }
+
+    return downSampledLogs;
   }
 
   /// Calculate stats for a session

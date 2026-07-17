@@ -43,7 +43,7 @@ class _SensorDashboardPageState extends State<SensorDashboardPage>
   static const Duration _recordingInterval = Duration(seconds: 1);
 
   final List<FlSpot> _spots = [];
-  late final StreamSubscription<AccelerometerEvent> _sub;
+  StreamSubscription<AccelerometerEvent>? _sub;
   late final DatabaseHelper _db;
   final VibrationService _service = VibrationService();
 
@@ -63,24 +63,51 @@ class _SensorDashboardPageState extends State<SensorDashboardPage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _db = DatabaseHelper();
-    _sub = accelerometerEventStream().listen(_onSensorEvent);
+    _initializeSensorStream();
+  }
+
+  void _initializeSensorStream() {
+    _sub = accelerometerEventStream().listen(
+      _onSensorEvent,
+      onError: (error) {
+        debugPrint('Sensor stream error: $error');
+      },
+      cancelOnError: false,
+    );
   }
 
   @override
   void dispose() {
-    _sub.cancel();
+    // Cancel sensor subscription to prevent memory leak
+    _sub?.cancel();
+    _sub = null;
+
+    // Cancel recording timer if active
     if (_recordingTimer?.isActive ?? false) {
       _recordingTimer?.cancel();
+      _recordingTimer = null;
     }
+
+    // Close database connection safely
     _db.close();
+
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.detached ||
+    if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
+      // Gracefully handle background state
+      if (_isRecording) {
+        // Optionally stop recording when app goes to background
+        // _stopRecording();
+      }
+    }
+    if (state == AppLifecycleState.detached) {
+      _sub?.cancel();
+      _sub = null;
       _db.close();
     }
   }
@@ -116,91 +143,170 @@ class _SensorDashboardPageState extends State<SensorDashboardPage>
   }
 
   Future<void> _startRecording() async {
-    final startTime = DateTime.now().toIso8601String();
-    _currentSessionId = await _db.createSession(startTime);
+    ScaffoldMessenger.of(context).clearSnackBars();
 
-    _samplesBuffer.clear();
+    try {
+      final startTime = DateTime.now().toIso8601String();
+      _currentSessionId = await _db.createSession(startTime);
 
-    _recordingTimer = Timer.periodic(_recordingInterval, (_) async {
-      await _recordingTick();
-    });
+      _samplesBuffer.clear();
 
-    if (!mounted) return;
-    setState(() {
-      _isRecording = true;
-    });
+      _recordingTimer = Timer.periodic(_recordingInterval, (_) async {
+        await _recordingTick();
+      });
+
+      if (!mounted) return;
+      setState(() {
+        _isRecording = true;
+      });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Recording started'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error starting recording: $e'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   Future<void> _recordingTick() async {
     if (_samplesBuffer.isEmpty) return;
 
-    final peakMagnitude = _samplesBuffer.reduce((a, b) => a > b ? a : b);
-    final timestamp = DateTime.now().toIso8601String();
+    try {
+      final peakMagnitude = _samplesBuffer.reduce((a, b) => a > b ? a : b);
+      final timestamp = DateTime.now().toIso8601String();
 
-    await _db.insertVibrationLog(
-      _currentSessionId!,
-      timestamp,
-      peakMagnitude,
-      0,
-    );
+      if (_currentSessionId != null) {
+        await _db.insertVibrationLog(
+          _currentSessionId!,
+          timestamp,
+          peakMagnitude,
+          0,
+        );
+      }
 
-    _samplesBuffer.clear();
+      _samplesBuffer.clear();
+    } catch (e) {
+      debugPrint('Error in recording tick: $e');
+    }
   }
 
   Future<void> _snapData() async {
-    if (!_isRecording || _currentMagnitude == 0.0) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
 
-    final timestamp = DateTime.now().toIso8601String();
-    await _db.insertVibrationLog(
-      _currentSessionId!,
-      timestamp,
-      _currentMagnitude,
-      1,
-    );
+    if (!_isRecording || _currentSessionId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Snap: Recording not active'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+      return;
+    }
 
-    if (!mounted) return;
+    try {
+      final timestamp = DateTime.now().toIso8601String();
+      await _db.insertVibrationLog(
+        _currentSessionId!,
+        timestamp,
+        _currentMagnitude,
+        1,
+      );
 
-    const snack = SnackBar(content: Text('Snap saved successfully'));
-    ScaffoldMessenger.of(context).showSnackBar(snack);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Snap saved: ${_fmt(_currentMagnitude)} m/s²'),
+          duration: const Duration(seconds: 1),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error saving snap: $e'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   Future<void> _stopRecording() async {
+    ScaffoldMessenger.of(context).clearSnackBars();
+
     _recordingTimer?.cancel();
+    _recordingTimer = null;
 
-    if (_currentSessionId == null) return;
+    if (_currentSessionId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No active recording to stop'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+      return;
+    }
 
-    final stats = await _db.calculateSessionStats(_currentSessionId!);
-    final maxVibration = (stats['max_mag'] as num?)?.toDouble() ?? 0.0;
-    final avgVibration = (stats['avg_mag'] as num?)?.toDouble() ?? 0.0;
-    final endTime = DateTime.now().toIso8601String();
+    try {
+      final stats = await _db.calculateSessionStats(_currentSessionId!);
+      final maxVibration = (stats['max_mag'] as num?)?.toDouble() ?? 0.0;
+      final avgVibration = (stats['avg_mag'] as num?)?.toDouble() ?? 0.0;
+      final endTime = DateTime.now().toIso8601String();
 
-    await _db.endSession(
-      _currentSessionId!,
-      endTime,
-      maxVibration,
-      avgVibration,
-    );
+      await _db.endSession(
+        _currentSessionId!,
+        endTime,
+        maxVibration,
+        avgVibration,
+      );
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    setState(() {
-      _isRecording = false;
-      _currentSessionId = null;
-      _samplesBuffer.clear();
-    });
+      setState(() {
+        _isRecording = false;
+        _currentSessionId = null;
+        _samplesBuffer.clear();
+      });
 
-    if (!mounted) return;
-
-    const snack = SnackBar(content: Text('Recording saved!'));
-    ScaffoldMessenger.of(context).showSnackBar(snack);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Recording saved! Max: ${_fmt(maxVibration)}, Avg: ${_fmt(avgVibration)}',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error stopping recording: $e'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   void _calibrateZero() {
+    ScaffoldMessenger.of(context).clearSnackBars();
+
     if (!_service.hasCalibrationSamples) {
-      const snack = SnackBar(
-        content: Text('Wait for a few sensor samples before zeroing.'),
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Wait for sensor samples before zeroing'),
+          duration: Duration(seconds: 2),
+        ),
       );
-      ScaffoldMessenger.of(context).showSnackBar(snack);
       return;
     }
 
@@ -208,25 +314,29 @@ class _SensorDashboardPageState extends State<SensorDashboardPage>
 
     if (!mounted) return;
 
-    final snack = SnackBar(
-      content: Text(
-        'Zeroing set to ${_fmt(_service.gravityOffset)} m/s². Device at rest will now read near 0.',
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Zero set to ${_fmt(_service.gravityOffset)} m/s²'),
+        duration: const Duration(seconds: 2),
       ),
     );
-    ScaffoldMessenger.of(context).showSnackBar(snack);
 
     setState(() {});
   }
 
   void _resetZero() {
+    ScaffoldMessenger.of(context).clearSnackBars();
+
     _service.resetCalibration();
 
     if (!mounted) return;
 
-    const snack = SnackBar(
-      content: Text('Zero reset to default gravity offset.'),
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Zero reset to default gravity'),
+        duration: Duration(seconds: 1),
+      ),
     );
-    ScaffoldMessenger.of(context).showSnackBar(snack);
 
     setState(() {});
   }
