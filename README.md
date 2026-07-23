@@ -2,6 +2,12 @@
 
 Aplikasi Android berbasis Flutter untuk memantau dan merekam getaran secara real-time menggunakan sensor accelerometer perangkat.
 
+## Informasi Mahasiswa & Mata Kuliah
+- **Nama**: Aditya Bagas Prakoso
+- **NIM**: 24.01.53.0003
+- **Kelompok**: A1
+- **Mata Kuliah**: Pemrograman Mobile
+
 ## Fitur
 
 - **Real-time monitoring** — menampilkan grafik getaran langsung dari accelerometer
