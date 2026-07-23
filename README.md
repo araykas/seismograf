@@ -1,6 +1,3 @@
-<img width="738" height="1600" alt="WhatsApp Image 2026-07-23 at 14 58 11" src="https://github.com/user-attachments/assets/61e46762-91e7-4b3e-a15c-dc825088aff8" />
-<img width="738" height="1600" alt="WhatsApp Image 2026-07-23 at 14 58 11" src="https://github.com/user-attachments/assets/838d9fef-aedb-4a26-9ead-517816246b7a" />
-<img width="738" height="1600" alt="WhatsApp Image 2026-07-23 at 14 58 11" src="https://github.com/user-attachments/assets/615e7653-6645-4a83-82e5-288d07878f3b" />
 # Seismograf
 
 Aplikasi Android berbasis Flutter untuk memantau dan merekam getaran secara real-time menggunakan sensor accelerometer perangkat.
@@ -24,7 +21,7 @@ Aplikasi Android berbasis Flutter untuk memantau dan merekam getaran secara real
 
 ## Screenshots
 
-<img width="738" height="1600" alt="WhatsApp Image 2026-07-23 at 14 58 11" src="https://github.com/user-attachments/assets/a7bbaf8a-a42f-4ab2-b44b-432a9f4b1066" />
+<img width="738" height="1200" alt="WhatsApp Image 2026-07-23 at 14 58 11" src="https://github.com/user-attachments/assets/a7bbaf8a-a42f-4ab2-b44b-432a9f4b1066" />
 
 ## Tech Stack
 
