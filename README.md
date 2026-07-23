@@ -21,7 +21,7 @@ Aplikasi Android berbasis Flutter untuk memantau dan merekam getaran secara real
 
 ## Screenshots
 
-<img width="738" height="1200" alt="WhatsApp Image 2026-07-23 at 14 58 11" src="https://github.com/user-attachments/assets/a7bbaf8a-a42f-4ab2-b44b-432a9f4b1066" />
+<img width="600" height="700" alt="WhatsApp Image 2026-07-23 at 14 58 11" src="https://github.com/user-attachments/assets/a7bbaf8a-a42f-4ab2-b44b-432a9f4b1066" />
 
 ## Tech Stack
 
